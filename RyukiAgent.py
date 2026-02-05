@@ -1,15 +1,28 @@
 import time
 
 import requests
+import json
+import random
 
 from Event import EventManager
 
 
 class RyukiAgent:
-    def __init__(self, name, persona):
+    def __init__(self, id, name, persona):
+        self.id = id
         self.name = name
         self.persona = persona
         self.memory = []
+
+    @classmethod
+    def from_json(cls, character_name, json_path="data/personas.json"):
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        config = data.get(character_name)
+        if not config:
+            raise ValueError(f"Character {character_name} not found in {json_path}, may have vanished into the mirror "
+                             f"world...")
+        return cls(id=config['id'], name=config['name'], persona=config['persona'])
 
     def chat(self, user_input, other_name, event_info):
         url = "http://localhost:11434/api/chat"
@@ -41,52 +54,37 @@ class RyukiAgent:
             return f"Error connecting to Ollama: {e}"  # [连接中断] 北冈律师大概是去化疗了（误）:
 
 
-kitaoka_persona = (
-    "Your name is Kitoka Shuichi, Your gender is male."
-    "You are Shuichi Kitaoka from Kamen Rider Ryuki. A brilliant, narcissistic lawyer "
-    "who seeks eternal life. You are wealthy, elegant, and often sarcastic. "
-    "Speak in a way that reflects your elite status and legal background."
-    "You have a devoted assistant named Yura Goro. He has received your kindness and is willing to do anything to "
-    "follow you."
-    "You think that goro should have his own life, but he denies this. He believes that it's not just about repaying "
-    "kindness"
-    "When you are with goro, you deliberately avoid the topic of repayment of favors."
-)
-goro_persona = (
-    "Your name is Yura Goro, Your gender is male."
-    "You are Kitagawa sensei's assistant and bodyguard."
-    "You have calm and kind personality and excellent cooking skills, you followed the promise of repayment after"
-    "receiving legal assistance from Kitagawa sensei."
-    "Although your gaze is sharp and you exude an unapproachable aura that can be misunderstood, you are merely a "
-    "person with a warm heart who is not good at expressing oneself."
-
-)
-
-
+start_id = random.randint(1, 4)
+kitaoka = RyukiAgent.from_json("kitaoka")
+goro = RyukiAgent.from_json("goro")
+shinji = RyukiAgent.from_json("shinji")
+ren = RyukiAgent.from_json("ren")
+riders = [kitaoka, goro, shinji, ren]
+starter = next(r for r in riders if r.id == start_id)
 event_mgr = EventManager()
-kitaoka = RyukiAgent("北冈秀一", kitaoka_persona)
-goro = RyukiAgent("由良吾郎", goro_persona)
-current_msg = "I need a cup of coffee, goro chan, the expensive one"
-speaker_name = "由良吾郎"
-other_name = "北冈秀一"  # 已经手动进行了角色的转换，方便直接进入第一轮对话
 
-print(f"--- 初始事件: {event_mgr.current_event.name} ---")
-print(f"北冈 (起始): {current_msg}\n")
+print(f"--- 轮回开始：本次首位发言者是 [{starter.name}] ---")
+event_info = event_mgr.event_prompt()
+initial_prompt = ("This is the beginning of the cycle. Based on your personality and current environment, take the "
+                  "initiative to speak the first words or make a gesture.")
+# ------------------
+current_msg = starter.chat(initial_prompt, "系统广播", event_info)
+speaker_name = starter.name
+print(f"{starter.name} (起始): {current_msg}\n")
+last_speaker_id = start_id
 
 for i in range(5):
+    possible_next_ids = [r.id for r in riders if r.id != last_speaker_id]
+    next_id = random.choice(possible_next_ids)
+    active_speaker = next(r for r in riders if r.id == next_id)
+
     event_info = event_mgr.event_prompt()
-    if speaker_name == "北冈秀一":
-        reply = kitaoka.chat(current_msg, "由良吾郎", event_info)
-        print(f"北冈: {reply}\n")
-    else:
-        reply = goro.chat(current_msg, "北冈秀一", event_info)
-        print(f"吾郎: {reply}\n")
+    reply = active_speaker.chat(current_msg, "all of the people", event_info)
     current_msg = reply
+    print(f"{active_speaker.name}: {current_msg}\n")
+    last_speaker_id = active_speaker.id
+
     if event_mgr.scan_content_for_event(current_msg):
         print(f"!!! [系统提示] 检测到关键词，场景切换至: {event_mgr.current_event.name} !!!\n")
-
-    temp = speaker_name
-    speaker_name = other_name
-    other_name = temp
 
     time.sleep(1)
